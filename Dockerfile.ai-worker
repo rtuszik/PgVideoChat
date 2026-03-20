@@ -1,0 +1,7 @@
+FROM oven/bun:1
+WORKDIR /app
+COPY ai-worker/package.json ./
+RUN bun install
+COPY ai-worker/ .
+ENV NODE_ENV=production
+CMD ["bun", "src/index.ts"]

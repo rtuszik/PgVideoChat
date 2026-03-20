@@ -1,9 +1,5 @@
 import pg from 'pg';
-
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is required');
-}
+import { DATABASE_URL, PG_SLOT_NAME } from './config.js';
 
 const pgSsl = process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: true };
 
@@ -15,8 +11,7 @@ export const pool = new pg.Pool({
 });
 
 export const REPLICATION_DSN = DATABASE_URL;
-
-export const SLOT_NAME = process.env.PG_SLOT_NAME ?? 'spacechat_slot';
+export const SLOT_NAME = PG_SLOT_NAME;
 export const PUBLICATION_NAME = 'spacechat_pub';
 
 export async function ensureReplicationSlot(): Promise<void> {

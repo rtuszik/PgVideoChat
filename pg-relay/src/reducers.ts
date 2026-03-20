@@ -8,29 +8,30 @@ export async function clientConnected(identity: string): Promise<void> {
      ON CONFLICT (identity) DO UPDATE
        SET connected_at = NOW(),
            nickname = CASE WHEN users.nickname = '' THEN $2 ELSE users.nickname END`,
-    [identity, defaultNick]
+    [identity, defaultNick],
   );
 }
 
 export async function clientDisconnected(identity: string): Promise<void> {
   await pool.query(
     `DELETE FROM call_sessions WHERE caller = $1 OR callee = $1`,
-    [identity]
+    [identity],
   );
   await pool.query(`DELETE FROM users WHERE identity = $1`, [identity]);
 }
 
 export async function setNickname(
   identity: string,
-  nickname: string
+  nickname: string,
 ): Promise<{ error?: string }> {
   const trimmed = nickname.trim();
   if (!trimmed) return { error: 'Nickname cannot be empty' };
-  if (trimmed.length > 32) return { error: 'Nickname must be <= 32 characters' };
+  if (trimmed.length > 32)
+    return { error: 'Nickname must be <= 32 characters' };
 
   const res = await pool.query(
     `UPDATE users SET nickname = $1 WHERE identity = $2`,
-    [trimmed, identity]
+    [trimmed, identity],
   );
   if (res.rowCount === 0) return { error: 'User not found' };
   return {};
@@ -38,7 +39,7 @@ export async function setNickname(
 
 export async function sendMessage(
   identity: string,
-  text: string
+  text: string,
 ): Promise<{ error?: string }> {
   const t = text.trim();
   if (!t) return { error: 'Message cannot be empty' };
@@ -46,7 +47,7 @@ export async function sendMessage(
 
   await pool.query(
     `INSERT INTO chat_messages (sender, sent_at, text) VALUES ($1, NOW(), $2)`,
-    [identity, t]
+    [identity, t],
   );
   return {};
 }
@@ -54,16 +55,12 @@ export async function sendMessage(
 export async function requestCall(
   identity: string,
   target: string,
-  callType: string
 ): Promise<{ error?: string }> {
   if (identity === target) return { error: 'Cannot call yourself' };
 
-  const ct = callType === 'Video' ? 'Video' : 'Voice';
-
-  const uRes = await pool.query(
-    `SELECT 1 FROM users WHERE identity = $1`,
-    [target]
-  );
+  const uRes = await pool.query(`SELECT 1 FROM users WHERE identity = $1`, [
+    target,
+  ]);
   if (uRes.rowCount === 0) return { error: 'Target is not online' };
 
   const cRes = await pool.query(
@@ -71,27 +68,27 @@ export async function requestCall(
      WHERE (caller = $1 OR callee = $1 OR caller = $2 OR callee = $2)
        AND state IN ('Ringing', 'Active')
      LIMIT 1`,
-    [identity, target]
+    [identity, target],
   );
   if ((cRes.rowCount ?? 0) > 0) {
     return { error: 'Caller or callee is already in a call' };
   }
 
   await pool.query(
-    `INSERT INTO call_sessions (call_type, state, caller, callee, created_at)
-     VALUES ($1, 'Ringing', $2, $3, NOW())`,
-    [ct, identity, target]
+    `INSERT INTO call_sessions (state, caller, callee, created_at)
+     VALUES ('Ringing', $1, $2, NOW())`,
+    [identity, target],
   );
   return {};
 }
 
 export async function acceptCall(
   identity: string,
-  sessionId: string
+  sessionId: string,
 ): Promise<{ error?: string }> {
   const res = await pool.query(
     `SELECT callee, state FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   if (res.rowCount === 0) return { error: 'Call session not found' };
 
@@ -101,36 +98,36 @@ export async function acceptCall(
 
   await pool.query(
     `UPDATE call_sessions SET state = 'Active', answered_at = NOW() WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   return {};
 }
 
 export async function declineCall(
   identity: string,
-  sessionId: string
+  sessionId: string,
 ): Promise<{ error?: string }> {
   const res = await pool.query(
     `SELECT callee FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   if (res.rowCount === 0) return { error: 'Call session not found' };
-  if (res.rows[0].callee !== identity) return { error: 'Only the callee can decline' };
+  if (res.rows[0].callee !== identity)
+    return { error: 'Only the callee can decline' };
 
-  await pool.query(
-    `DELETE FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
-  );
+  await pool.query(`DELETE FROM call_sessions WHERE session_id = $1`, [
+    sessionId,
+  ]);
   return {};
 }
 
 export async function endCall(
   identity: string,
-  sessionId: string
+  sessionId: string,
 ): Promise<{ error?: string }> {
   const res = await pool.query(
     `SELECT caller, callee FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   if (res.rowCount === 0) return { error: 'Call session not found' };
 
@@ -139,10 +136,9 @@ export async function endCall(
     return { error: 'Only a participant can end this call' };
   }
 
-  await pool.query(
-    `DELETE FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
-  );
+  await pool.query(`DELETE FROM call_sessions WHERE session_id = $1`, [
+    sessionId,
+  ]);
   return {};
 }
 
@@ -156,11 +152,12 @@ export async function sendAudioFrame(params: {
   rms: number;
   pcm16le: Buffer;
 }): Promise<{ error?: string }> {
-  const { identity, sessionId, to, seq, sampleRate, channels, rms, pcm16le } = params;
+  const { identity, sessionId, to, seq, sampleRate, channels, rms, pcm16le } =
+    params;
 
   const res = await pool.query(
     `SELECT state, caller, callee FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
+    [sessionId],
   );
   if (res.rowCount === 0) return { error: 'Call session not found' };
 
@@ -179,45 +176,7 @@ export async function sendAudioFrame(params: {
   await pool.query(
     `INSERT INTO audio_frames (session_id, from_id, to_id, seq, sample_rate, channels, rms, pcm16le)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [sessionId, identity, to, seq, sampleRate, channels, rms, pcm16le]
-  );
-  return {};
-}
-
-export async function sendVideoFrame(params: {
-  identity: string;
-  sessionId: string;
-  to: string;
-  seq: number;
-  width: number;
-  height: number;
-  jpeg: Buffer;
-}): Promise<{ error?: string }> {
-  const { identity, sessionId, to, seq, width, height, jpeg } = params;
-
-  const res = await pool.query(
-    `SELECT state, call_type, caller, callee FROM call_sessions WHERE session_id = $1`,
-    [sessionId]
-  );
-  if (res.rowCount === 0) return { error: 'Call session not found' };
-
-  const sess = res.rows[0];
-  if (sess.state !== 'Active') return { error: 'Call is not active' };
-  if (sess.call_type !== 'Video') return { error: 'Not a video call' };
-
-  const peer =
-    sess.caller === identity
-      ? sess.callee
-      : sess.callee === identity
-        ? sess.caller
-        : null;
-  if (!peer || peer !== to) return { error: 'Invalid recipient' };
-  if (jpeg.length > 512_000) return { error: 'Video frame too large' };
-
-  await pool.query(
-    `INSERT INTO video_frames (session_id, from_id, to_id, seq, width, height, jpeg)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [sessionId, identity, to, seq, width, height, jpeg]
+    [sessionId, identity, to, seq, sampleRate, channels, rms, pcm16le],
   );
   return {};
 }

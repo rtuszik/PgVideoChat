@@ -1,0 +1,8 @@
+FROM oven/bun:1
+WORKDIR /app
+COPY pg-relay/package.json ./
+RUN bun install
+COPY pg-relay/ .
+ENV NODE_ENV=production
+EXPOSE 9000
+CMD ["bun", "src/server.ts"]

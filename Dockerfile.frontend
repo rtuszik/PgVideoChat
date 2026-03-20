@@ -1,0 +1,18 @@
+FROM oven/bun:1 AS build
+WORKDIR /app
+COPY package.json bun.lockb ./
+RUN bun install --frozen-lockfile
+COPY . .
+RUN bun add -d @sveltejs/adapter-node
+ARG VITE_RELAY_URI=ws://localhost:9000
+ENV VITE_RELAY_URI=$VITE_RELAY_URI
+RUN bun run build
+
+FROM oven/bun:1
+WORKDIR /app
+COPY --from=build /app/build ./build
+COPY --from=build /app/package.json .
+COPY --from=build /app/node_modules ./node_modules
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["bun", "build/index.js"]

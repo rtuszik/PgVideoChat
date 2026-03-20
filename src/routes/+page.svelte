@@ -19,13 +19,13 @@
     setNickname,
     shortHex,
     identityHex,
-    connStore
+    connStore,
+    aiTranscriptsStore
   } from '$lib/relay';
-  import { startCallRuntime, stopCallRuntime, localVideoStream, remoteVideoUrl, remoteTalking } from '$lib/callRuntime';
+  import { startCallRuntime, stopCallRuntime, remoteTalking } from '$lib/callRuntime';
 
   let messageText = '';
   let nicknameText = '';
-  let localEl: HTMLVideoElement | null = null;
 
   let messagesEl: HTMLDivElement | null = null;
   let lastScrollKey = '';
@@ -56,14 +56,6 @@
       if (keys.length === 1) return keys[0].toLowerCase();
     }
     return String(v).toLowerCase();
-  }
-
-  function callTypeTag(sess: any): string {
-    return tagLower(sess?.call_type ?? sess?.callType);
-  }
-
-  function callTypeLabel(sess: any): string {
-    return callTypeTag(sess) === 'video' ? 'Video' : 'Voice';
   }
 
   function stateTag(sess: any): string {
@@ -120,6 +112,38 @@
     return u ? displayUser(u) : shortHex(identity);
   }
 
+  function isAiUser(u: any): boolean {
+    return u?.is_ai === true || u?.is_ai === 't';
+  }
+
+  function isPeerAI(sess: any): boolean {
+    const meHex = identityHex($identityStore);
+    const peerIdentity = identityHex(sess.caller) === meHex ? sess.callee : sess.caller;
+    const peerHex = identityHex(peerIdentity);
+    const user = ($usersStore ?? []).find((u) => identityHex(u.identity) === peerHex);
+    return user ? isAiUser(user) : false;
+  }
+
+  $: activeCallTranscripts = ($aiTranscriptsStore ?? []).filter((t) => {
+    if (!$activeCallStore) return false;
+    const sid = sessionIdOf($activeCallStore);
+    return t.session_id === sid || t.session_id?.toString?.() === sid;
+  });
+
+  let transcriptEl: HTMLDivElement | null = null;
+  let lastTranscriptKey = '';
+
+  $: {
+    const transcripts = activeCallTranscripts;
+    const key = transcripts.length ? (transcripts[transcripts.length - 1]?.id?.toString?.() ?? String(transcripts.length)) : '';
+    if (transcriptEl && key && key !== lastTranscriptKey) {
+      lastTranscriptKey = key;
+      tick().then(() => {
+        if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      });
+    }
+  }
+
   function openMenu(e: MouseEvent, u: any) {
     e.preventDefault();
     const myHex = identityHex($identityStore);
@@ -128,10 +152,10 @@
     menu = { open: true, x: e.clientX, y: e.clientY, target: u };
   }
 
-  async function call(type: 'Voice' | 'Video') {
+  async function call() {
     if (!menu.target) return;
     try {
-      await requestCall(menu.target.identity, type);
+      await requestCall(menu.target.identity);
     } catch (e) {
       console.error('requestCall failed', e);
     } finally {
@@ -229,14 +253,6 @@
   });
 
   $: {
-    const stream = $localVideoStream;
-    if (localEl && stream) {
-      if (localEl.srcObject !== stream) localEl.srcObject = stream;
-    }
-    if (localEl && !stream) localEl.srcObject = null;
-  }
-
-  $: {
     const msgs = $messagesStore ?? [];
     const key = msgs.length ? (msgs[msgs.length - 1]?.id?.toString?.() ?? String(msgs.length)) : '';
     if (messagesEl && key && key !== lastScrollKey) {
@@ -250,7 +266,7 @@
 
 <div class="app" on:keydown={onKeyDown}>
   <header class="topbar">
-    <div class="brand">Voice/Video Demo</div>
+    <div class="brand">SpaceChatDB</div>
     <div class="status">
       {#if $isConnected}
         <span class="pill ok">Connected</span>
@@ -304,7 +320,7 @@
             class:me={identityHex($identityStore) === identityHex(u.identity)}
             on:contextmenu={(e) => openMenu(e, u)}
           >
-            <div class="name">{displayUser(u)}</div>
+            <div class="name">{displayUser(u)}{#if isAiUser(u)} <span class="pill ai">AI</span>{/if}</div>
             <div class="mono sub">{shortHex(u.identity)}</div>
           </div>
         {/each}
@@ -314,15 +330,14 @@
 
   {#if menu.open}
     <div class="contextMenu" style="left:{menu.x}px; top:{menu.y}px;">
-      <button class="menuBtn" on:click={() => void call('Voice')}>Voice call</button>
-      <button class="menuBtn" on:click={() => void call('Video')}>Video call</button>
+      <button class="menuBtn" on:click={() => void call()}>Call</button>
     </div>
   {/if}
 
   {#if $incomingCallStore}
     <div class="modalBackdrop">
       <div class="modal">
-        <div class="modalTitle">Incoming {callTypeLabel($incomingCallStore)} call</div>
+        <div class="modalTitle">Incoming call</div>
         <div class="modalBody">
           From: <span class="mono">{displayIdentity($incomingCallStore.caller)}</span>
         </div>
@@ -338,7 +353,7 @@
     <div class="callBar">
       <div class="callInfo">
         <div class="callTitle">
-          {callTypeLabel($activeCallStore)} call with
+          Call with
           {#if identityHex($identityStore) === identityHex($activeCallStore.caller)}
             {displayIdentity($activeCallStore.callee)}
           {:else}
@@ -346,16 +361,14 @@
           {/if}
         </div>
 
-        {#if callTypeTag($activeCallStore) === 'voice'}
-          <div class="talk">
-            Remote:
-            {#if $remoteTalking}
-              <span class="pill ok">talking</span>
-            {:else}
-              <span class="pill">silent</span>
-            {/if}
-          </div>
-        {/if}
+        <div class="talk">
+          Remote:
+          {#if $remoteTalking}
+            <span class="pill ok">talking</span>
+          {:else}
+            <span class="pill">silent</span>
+          {/if}
+        </div>
       </div>
 
       <div class="callActions">
@@ -363,23 +376,17 @@
       </div>
     </div>
 
-    {#if callTypeTag($activeCallStore) === 'video'}
-      <div class="videoStage">
-        <div class="videoPane">
-          <div class="videoLabel">Local</div>
-          <video class="video" autoplay playsinline muted bind:this={localEl} />
-        </div>
-
-        <div class="videoPane">
-          <div class="videoLabel">Remote</div>
-          {#if $remoteVideoUrl}
-            <img class="video" src={$remoteVideoUrl} alt="remote video" />
-          {:else}
-            <div class="videoPlaceholder">Waiting for remote video…</div>
-          {/if}
-        </div>
+    {#if isPeerAI($activeCallStore) && activeCallTranscripts.length > 0}
+      <div class="transcriptPanel" bind:this={transcriptEl}>
+        {#each activeCallTranscripts as t (t.id)}
+          <div class="transcript {t.role}">
+            <span class="transcriptRole">{t.role === 'human' ? 'You' : 'AI'}</span>
+            <span class="transcriptText">{t.text}</span>
+          </div>
+        {/each}
       </div>
     {/if}
+
   {/if}
 </div>
 
@@ -427,9 +434,10 @@
   .modalBody { opacity: 0.9; margin-bottom: 12px; }
   .modalActions { display: flex; gap: 8px; justify-content: flex-end; }
   .callBar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 55; display: flex; justify-content: space-between; align-items: center; border: 1px solid #1b2230; background: #0b0d12; border-radius: 14px; padding: 12px 12px; gap: 12px; }
-  .videoStage { position: fixed; left: 12px; right: 12px; bottom: 86px; top: 70px; z-index: 54; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .videoPane { border: 1px solid #1b2230; background: #0b0d12; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
-  .videoLabel { padding: 10px 12px; border-bottom: 1px solid #1b2230; font-weight: 600; }
-  .video { width: 100%; height: 100%; object-fit: contain; background: #000; flex: 1; }
-  .videoPlaceholder { flex: 1; display: grid; place-items: center; opacity: 0.7; }
+  .pill.ai { border-color: #4a6fa5; background: #0f1a2d; font-size: 11px; padding: 2px 6px; vertical-align: middle; }
+  .transcriptPanel { position: fixed; left: 12px; right: 12px; bottom: 86px; max-height: 280px; z-index: 53; overflow: auto; border: 1px solid #1b2230; background: #0f121a; border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .transcript { padding: 8px 10px; border-radius: 10px; border: 1px solid #1b2230; background: #0b0d12; }
+  .transcript.assistant { border-color: #1a3a5c; background: #0c1420; }
+  .transcriptRole { font-weight: 600; margin-right: 8px; font-size: 12px; opacity: 0.7; text-transform: uppercase; }
+  .transcriptText { white-space: pre-wrap; word-break: break-word; }
 </style>

@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 
 export type MediaSettings = {
   id: number;
@@ -7,12 +7,6 @@ export type MediaSettings = {
   audio_frame_ms: number;
   audio_max_frame_bytes: number;
   audio_talking_rms_threshold: number;
-
-  video_width: number;
-  video_height: number;
-  video_fps: number;
-  video_jpeg_quality: number;
-  video_max_frame_bytes: number;
 };
 
 // No defaults: null until loaded from DB

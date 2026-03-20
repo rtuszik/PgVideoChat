@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Run Biome
+        run: bun run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Test pg-relay
+        run: cd pg-relay && bun install && bun run test
+      - name: Test ai-worker
+        run: cd ai-worker && bun install && bun run test
+      - name: Test frontend
+        run: bun run test

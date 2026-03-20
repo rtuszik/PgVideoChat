@@ -4,10 +4,7 @@ export function startCleanup(intervalMs = 2_000): NodeJS.Timeout {
   async function run() {
     try {
       await pool.query(
-        `DELETE FROM audio_frames WHERE inserted_at < NOW() - INTERVAL '5 seconds'`
-      );
-      await pool.query(
-        `DELETE FROM video_frames WHERE inserted_at < NOW() - INTERVAL '5 seconds'`
+        `DELETE FROM audio_frames WHERE inserted_at < NOW() - INTERVAL '30 seconds'`,
       );
     } catch (err) {
       console.error('[cleanup] error', err);

@@ -1,7 +1,7 @@
+import { get, writable } from 'svelte/store';
 import { browser } from '$app/environment';
-import { writable, get } from 'svelte/store';
-import { handleAudioEvent, handleVideoEvent, stopCallRuntime } from './callRuntime';
-import { mediaSettingsStore, type MediaSettings } from './mediaSettings';
+import { handleAudioEvent, stopCallRuntime } from './callRuntime';
+import { type MediaSettings, mediaSettingsStore } from './mediaSettings';
 
 // Identity shim: wraps hex string with .toHexString() so +page.svelte works unchanged
 export type IdentityCompat = {
@@ -31,6 +31,7 @@ export const callSessionsStore = writable<any[]>([]);
 
 export const incomingCallStore = writable<any | null>(null);
 export const activeCallStore = writable<any | null>(null);
+export const aiTranscriptsStore = writable<any[]>([]);
 
 // Identity helpers (same signatures as original)
 export function identityHex(id: any): string {
@@ -79,7 +80,9 @@ function removeUser(arr: any[], identity: any): any[] {
 function upsertMessage(arr: any[], row: any): any[] {
   const id = row?.id?.toString?.() ?? String(row?.id ?? '');
   if (!id) return arr;
-  const idx = arr.findIndex((m) => (m?.id?.toString?.() ?? String(m?.id ?? '')) === id);
+  const idx = arr.findIndex(
+    (m) => (m?.id?.toString?.() ?? String(m?.id ?? '')) === id,
+  );
   let next: any[];
   if (idx === -1) next = [...arr, row];
   else {
@@ -136,11 +139,6 @@ function applySettingsRow(row: any): void {
     audio_frame_ms: Number(row.audio_frame_ms),
     audio_max_frame_bytes: Number(row.audio_max_frame_bytes),
     audio_talking_rms_threshold: Number(row.audio_talking_rms_threshold),
-    video_width: Number(row.video_width),
-    video_height: Number(row.video_height),
-    video_fps: Number(row.video_fps),
-    video_jpeg_quality: Number(row.video_jpeg_quality),
-    video_max_frame_bytes: Number(row.video_max_frame_bytes),
   };
 
   // Validate all fields are finite numbers
@@ -178,6 +176,14 @@ function applySnapshot(table: string, rows: any[]): void {
       mediaSettingsStore.set(null);
       connectionError.set('media_settings singleton (id=1) not found');
     }
+  } else if (table === 'ai_transcripts') {
+    const transcripts = rows.slice();
+    transcripts.sort((a, b) => {
+      const ai = BigInt(a.id ?? 0);
+      const bi = BigInt(b.id ?? 0);
+      return ai < bi ? -1 : ai > bi ? 1 : 0;
+    });
+    aiTranscriptsStore.set(transcripts);
   }
 }
 
@@ -190,6 +196,26 @@ function applyInsert(table: string, row: any): void {
     callSessionsStore.update((s) => upsertCallSession(s, coerceSession(row)));
   } else if (table === 'media_settings') {
     applySettingsRow(row);
+  } else if (table === 'ai_transcripts') {
+    aiTranscriptsStore.update((arr) => {
+      const id = row?.id?.toString?.() ?? String(row?.id ?? '');
+      if (!id) return arr;
+      const idx = arr.findIndex(
+        (t) => (t?.id?.toString?.() ?? String(t?.id ?? '')) === id,
+      );
+      let next: any[];
+      if (idx === -1) next = [...arr, row];
+      else {
+        next = arr.slice();
+        next[idx] = row;
+      }
+      next.sort((a, b) => {
+        const ai = BigInt(a.id ?? 0);
+        const bi = BigInt(b.id ?? 0);
+        return ai < bi ? -1 : ai > bi ? 1 : 0;
+      });
+      return next;
+    });
   }
 }
 
@@ -204,7 +230,7 @@ function applyDelete(table: string, old: any): void {
   } else if (table === 'chat_messages') {
     const id = old?.id?.toString?.() ?? String(old?.id ?? '');
     messagesStore.update((m) =>
-      m.filter((msg) => (msg.id?.toString?.() ?? String(msg.id ?? '')) !== id)
+      m.filter((msg) => (msg.id?.toString?.() ?? String(msg.id ?? '')) !== id),
     );
   } else if (table === 'call_sessions') {
     callSessionsStore.update((s) => removeCallSession(s, old));
@@ -219,6 +245,11 @@ function applyDelete(table: string, old: any): void {
       mediaSettingsStore.set(null);
       connectionError.set('media_settings singleton (id=1) was deleted');
     }
+  } else if (table === 'ai_transcripts') {
+    const id = old?.id?.toString?.() ?? String(old?.id ?? '');
+    aiTranscriptsStore.update((arr) =>
+      arr.filter((t) => (t?.id?.toString?.() ?? String(t?.id ?? '')) !== id),
+    );
   }
 }
 
@@ -240,41 +271,30 @@ function handleIncoming(buf: ArrayBuffer): void {
     return;
   }
 
-  if ((tag === 0x01 || tag === 0x02) && buf.byteLength >= 5) {
-    // Binary media frame
+  if (tag === 0x01 && buf.byteLength >= 5) {
+    // Binary audio frame
     const headerLen = view.getUint32(1, false);
     if (buf.byteLength < 5 + headerLen) return;
 
     let header: any;
     try {
       header = JSON.parse(
-        new TextDecoder().decode(new Uint8Array(buf, 5, headerLen))
+        new TextDecoder().decode(new Uint8Array(buf, 5, headerLen)),
       );
     } catch {
       return;
     }
     const payload = new Uint8Array(buf, 5 + headerLen);
 
-    if (tag === 0x01) {
-      handleAudioEvent({
-        session_id: header.session_id,
-        from: makeIdent(header.from),
-        seq: header.seq,
-        sample_rate: header.sample_rate,
-        channels: header.channels,
-        rms: header.rms,
-        pcm16le: payload,
-      });
-    } else {
-      handleVideoEvent({
-        session_id: header.session_id,
-        from: makeIdent(header.from),
-        seq: header.seq,
-        width: header.width,
-        height: header.height,
-        jpeg: payload,
-      });
-    }
+    handleAudioEvent({
+      session_id: header.session_id,
+      from: makeIdent(header.from),
+      seq: header.seq,
+      sample_rate: header.sample_rate,
+      channels: header.channels,
+      rms: header.rms,
+      pcm16le: payload,
+    });
   }
 }
 
@@ -320,7 +340,7 @@ function handleControlMessage(msg: any): void {
 }
 
 // Connection
-let ws: WebSocket | null = null;
+let _ws: WebSocket | null = null;
 let started = false;
 
 export function connectRelay(): void {
@@ -340,14 +360,15 @@ export function connectRelay(): void {
   const url = savedToken ? `${RELAY_URI}?token=${savedToken}` : RELAY_URI;
   const socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
-  ws = socket;
+  _ws = socket;
 
   const conn: RelayConn = {
     sendBinaryFrame(buf: ArrayBuffer) {
       if (socket.readyState === WebSocket.OPEN) socket.send(buf);
     },
     sendControl(obj: object) {
-      if (socket.readyState === WebSocket.OPEN) socket.send(buildControlFrame(obj));
+      if (socket.readyState === WebSocket.OPEN)
+        socket.send(buildControlFrame(obj));
     },
   };
 
@@ -369,7 +390,7 @@ export function connectRelay(): void {
       connectionError.set(`Disconnected: ${ev.reason || ev.code}`);
     }
     started = false;
-    ws = null;
+    _ws = null;
   };
 
   socket.onerror = () => {
@@ -396,17 +417,19 @@ export function setNickname(nickname: string): void {
   conn.sendControl({ type: 'set_nickname', nickname });
 }
 
-export function requestCall(target: any, callType: 'Voice' | 'Video'): void {
+export function requestCall(target: any): void {
   const conn = get(connStore);
   if (!conn) return;
 
   if (!get(mediaSettingsStore)) {
-    actionError.set('Cannot place call: media_settings singleton (id=1) not loaded');
+    actionError.set(
+      'Cannot place call: media_settings singleton (id=1) not loaded',
+    );
     return;
   }
 
   const targetHex = identityHex(target);
-  conn.sendControl({ type: 'request_call', target: targetHex, call_type: callType });
+  conn.sendControl({ type: 'request_call', target: targetHex });
 }
 
 export function acceptCall(sessionId: any): void {

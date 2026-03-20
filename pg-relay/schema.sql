@@ -4,7 +4,8 @@
 CREATE TABLE IF NOT EXISTS users (
     identity     TEXT        PRIMARY KEY,
     nickname     TEXT        NOT NULL DEFAULT '',
-    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_ai        BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS chat_messages (
@@ -16,7 +17,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 
 CREATE TABLE IF NOT EXISTS call_sessions (
     session_id  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    call_type   TEXT        NOT NULL CHECK (call_type IN ('Voice', 'Video')),
     state       TEXT        NOT NULL CHECK (state IN ('Ringing', 'Active')),
     caller      TEXT        NOT NULL,
     callee      TEXT        NOT NULL,
@@ -26,15 +26,10 @@ CREATE TABLE IF NOT EXISTS call_sessions (
 
 CREATE TABLE IF NOT EXISTS media_settings (
     id                          INT      PRIMARY KEY CHECK (id = 1),
-    audio_target_sample_rate    INT      NOT NULL DEFAULT 16000,
+    audio_target_sample_rate    INT      NOT NULL DEFAULT 24000,
     audio_frame_ms              SMALLINT NOT NULL DEFAULT 50,
     audio_max_frame_bytes       INT      NOT NULL DEFAULT 64000,
-    audio_talking_rms_threshold REAL     NOT NULL DEFAULT 0.02,
-    video_width                 SMALLINT NOT NULL DEFAULT 320,
-    video_height                SMALLINT NOT NULL DEFAULT 180,
-    video_fps                   SMALLINT NOT NULL DEFAULT 5,
-    video_jpeg_quality          REAL     NOT NULL DEFAULT 0.55,
-    video_max_frame_bytes       INT      NOT NULL DEFAULT 512000
+    audio_talking_rms_threshold REAL     NOT NULL DEFAULT 0.02
 );
 INSERT INTO media_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
 
@@ -54,25 +49,21 @@ CREATE TABLE IF NOT EXISTS audio_frames (
 CREATE INDEX IF NOT EXISTS audio_frames_time_idx ON audio_frames (inserted_at);
 ALTER TABLE audio_frames SET (autovacuum_vacuum_scale_factor = 0.01);
 
-CREATE TABLE IF NOT EXISTS video_frames (
+-- AI conversation transcripts (queryable conversation history)
+CREATE TABLE IF NOT EXISTS ai_transcripts (
     id          BIGSERIAL   PRIMARY KEY,
     session_id  UUID        NOT NULL,
-    from_id     TEXT        NOT NULL,
-    to_id       TEXT        NOT NULL,
-    seq         INT         NOT NULL,
-    width       SMALLINT    NOT NULL,
-    height      SMALLINT    NOT NULL,
-    jpeg        BYTEA       NOT NULL,
-    inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    role        TEXT        NOT NULL CHECK (role IN ('human', 'assistant')),
+    text        TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS video_frames_time_idx ON video_frames (inserted_at);
-ALTER TABLE video_frames SET (autovacuum_vacuum_scale_factor = 0.01);
+CREATE INDEX IF NOT EXISTS ai_transcripts_session_idx ON ai_transcripts (session_id, created_at);
 
 -- Publication for logical replication
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'spacechat_pub') THEN
         CREATE PUBLICATION spacechat_pub FOR TABLE
-            users, chat_messages, call_sessions, media_settings, audio_frames, video_frames;
+            users, chat_messages, call_sessions, media_settings, audio_frames, ai_transcripts;
     END IF;
 END $$;

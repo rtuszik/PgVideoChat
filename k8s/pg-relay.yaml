@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pg-relay
+  namespace: spacechatdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pg-relay
+  template:
+    metadata:
+      labels:
+        app: pg-relay
+    spec:
+      containers:
+        - name: pg-relay
+          image: spacechatdb/pg-relay:latest
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: DATABASE_URL
+            - name: PG_SSL
+              value: "false"
+            - name: PORT
+              value: "9000"
+          ports:
+            - containerPort: 9000
+          readinessProbe:
+            httpGet:
+              port: 9000
+              path: /
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-relay
+  namespace: spacechatdb
+spec:
+  selector:
+    app: pg-relay
+  ports:
+    - port: 9000

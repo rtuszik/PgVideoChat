@@ -1,13 +1,13 @@
 {
-  "name": "pg-relay",
+  "name": "ai-worker",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/server.ts",
+  "main": "src/index.ts",
   "scripts": {
-    "start": "bun src/server.ts",
-    "dev": "bun --watch src/server.ts",
+    "start": "bun src/index.ts",
+    "dev": "bun --watch src/index.ts",
     "check": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test --preload ./src/__tests__/setup.ts"
   },
   "dependencies": {
     "pg": "^8.13.0",

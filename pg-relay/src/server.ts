@@ -1,13 +1,13 @@
 import http from 'node:http';
-import { WebSocketServer, WebSocket } from 'ws';
-import { pool, ensureReplicationSlot } from './db.js';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createIdentity, resolveToken } from './auth.js';
-import * as reducers from './reducers.js';
-import { startReplication, type ClientMap } from './replication.js';
 import { startCleanup } from './cleanup.js';
+import { ensureReplicationSlot, pool } from './db.js';
 import { buildJsonFrame, parseIncoming } from './protocol.js';
+import * as reducers from './reducers.js';
+import { type ClientMap, startReplication } from './replication.js';
 
-const PORT = parseInt(process.env.PORT ?? '9000');
+const PORT = parseInt(process.env.PORT ?? '9000', 10);
 
 // identity hex → WebSocket (one connection per identity)
 const clients: ClientMap = new Map();
@@ -79,7 +79,10 @@ wss.on('connection', async (ws: WebSocket, req) => {
           : Buffer.from(data);
       await handleMessage(ws, identity, buf);
     } catch (err) {
-      console.error(`[ws] message handler error for ${identity.slice(0, 12)}`, err);
+      console.error(
+        `[ws] message handler error for ${identity.slice(0, 12)}`,
+        err,
+      );
     }
   });
 
@@ -104,6 +107,10 @@ async function sendSnapshot(ws: WebSocket): Promise<void> {
     ['chat_messages', 'SELECT * FROM chat_messages ORDER BY id DESC LIMIT 250'],
     ['call_sessions', 'SELECT * FROM call_sessions'],
     ['media_settings', 'SELECT * FROM media_settings WHERE id = 1'],
+    [
+      'ai_transcripts',
+      `SELECT * FROM ai_transcripts WHERE created_at > NOW() - INTERVAL '1 hour' ORDER BY id DESC LIMIT 200`,
+    ],
   ];
 
   for (const [table, query] of tables) {
@@ -118,7 +125,7 @@ async function sendSnapshot(ws: WebSocket): Promise<void> {
 async function handleMessage(
   ws: WebSocket,
   identity: string,
-  buf: Buffer
+  buf: Buffer,
 ): Promise<void> {
   const parsed = parseIncoming(buf);
   if (!parsed) {
@@ -146,35 +153,20 @@ async function handleMessage(
     return;
   }
 
-  if (parsed.tag === 0x02 && parsed.header && parsed.payload) {
-    const result = await reducers.sendVideoFrame({
-      identity,
-      sessionId: parsed.header.session_id,
-      to: parsed.header.to,
-      seq: parsed.header.seq,
-      width: parsed.header.width,
-      height: parsed.header.height,
-      jpeg: parsed.payload,
-    });
-    if (result.error) sendError(ws, 'send_video_frame', result.error);
-    return;
-  }
-
   sendError(ws, 'unknown', 'Unknown message type');
 }
 
 async function handleControl(
   ws: WebSocket,
   identity: string,
-  msg: any
+  msg: any,
 ): Promise<void> {
   const type: string = msg.type ?? '';
 
   const dispatch: Record<string, () => Promise<{ error?: string }>> = {
     set_nickname: () => reducers.setNickname(identity, msg.nickname ?? ''),
     send_message: () => reducers.sendMessage(identity, msg.text ?? ''),
-    request_call: () =>
-      reducers.requestCall(identity, msg.target ?? '', msg.call_type ?? 'Voice'),
+    request_call: () => reducers.requestCall(identity, msg.target ?? ''),
     accept_call: () => reducers.acceptCall(identity, msg.session_id ?? ''),
     decline_call: () => reducers.declineCall(identity, msg.session_id ?? ''),
     end_call: () => reducers.endCall(identity, msg.session_id ?? ''),
