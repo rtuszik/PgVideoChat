@@ -5,7 +5,8 @@ if (!DATABASE_URL) {
   throw new Error('DATABASE_URL environment variable is required');
 }
 
-const pgSsl = process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: true };
+const pgSsl =
+  process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: true };
 
 export const pool = new pg.Pool({
   connectionString: DATABASE_URL,

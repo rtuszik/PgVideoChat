@@ -1,7 +1,8 @@
 import pg from 'pg';
 import { DATABASE_URL, PG_SLOT_NAME } from './config.js';
 
-const pgSsl = process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: true };
+const pgSsl =
+  process.env.PG_SSL === 'false' ? false : { rejectUnauthorized: true };
 
 export const pool = new pg.Pool({
   connectionString: DATABASE_URL,
